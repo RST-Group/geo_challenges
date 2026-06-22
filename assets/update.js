@@ -52,8 +52,13 @@ CTFd.plugin.run((_CTFd) => {
         }
 
         // Add geocoder control
+        // Coordonnées saisies (décimal, DMS, DMM, N/S/E/W) => point exact ;
+        // sinon recherche de lieu via Nominatim.
         const geocoder = L.Control.geocoder({
-            defaultMarkGeocode: false
+            defaultMarkGeocode: false,
+            geocoder: L.Control.Geocoder.latLng({
+                next: L.Control.Geocoder.nominatim(),
+            }),
         }).addTo(map);
 
         geocoder.on('markgeocode', function(event) {

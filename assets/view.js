@@ -97,6 +97,11 @@ CTFd.plugin.run((_CTFd) => {
 
         const geocoder = L.Control.geocoder({
           defaultMarkGeocode: false,
+          // Si la saisie ressemble à des coordonnées (décimal, DMS, DMM, N/S/E/W),
+          // on place le marqueur sur le point exact ; sinon on délègue à Nominatim.
+          geocoder: L.Control.Geocoder.latLng({
+            next: L.Control.Geocoder.nominatim(),
+          }),
         }).addTo(mapInstance);
 
         geocoder.on("markgeocode", function (event) {
