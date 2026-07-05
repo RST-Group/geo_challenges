@@ -204,6 +204,8 @@ CTFd.plugin.run((_CTFd) => {
         if (data.success) {
           // Store tolerance radius in a data attribute
           $("#map-solve").attr("data-tolerance", data.data.tolerance_radius || 10);
+          // Polygon challenges have no tolerance zone to display
+          $("#map-solve").attr("data-polygon-mode", data.data.polygon_mode ? "1" : "");
         }
         return data;
       });
@@ -211,7 +213,10 @@ CTFd.plugin.run((_CTFd) => {
 
   function updateToleranceCircle() {
     if (!marker) return;
-    
+
+    // Polygon challenges: no tolerance zone (the answer is a drawn area, hidden from players)
+    if ($("#map-solve").attr("data-polygon-mode") === "1") return;
+
     // Get tolerance radius from data attribute
     const tolerance = parseFloat($("#map-solve").attr("data-tolerance") || 10);
     

@@ -1,9 +1,9 @@
 CTFd.plugin.run((_CTFd) => {
     const $ = _CTFd.lib.$;
-    
-    // Wait for Leaflet and Geocoder to be loaded
+
+    // Wait for Leaflet, Geocoder and Leaflet.Draw to be loaded
     const waitForDeps = setInterval(() => {
-        if (window.L && window.L.Control.Geocoder) {
+        if (window.L && window.L.Control.Geocoder && window.L.Control.Draw) {
             clearInterval(waitForDeps);
             initMap();
         }
@@ -12,7 +12,7 @@ CTFd.plugin.run((_CTFd) => {
     function initMap() {
         // Initialize the map
         const map = L.map('map-create').setView([0, 0], 2);
-        
+
         // Define base layers
         const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
@@ -32,20 +32,7 @@ CTFd.plugin.run((_CTFd) => {
             "Street Map": osmLayer,
             "Satellite": esriWorldImagery
         };
-
-        // Add layer control outside of any form elements
-        const layerControl = L.control.layers(baseLayers);
-        layerControl.addTo(map);
-        
-        // Ensure the layer control doesn't interfere with form submission
-        const layerControlContainer = document.querySelector('.leaflet-control-layers');
-        if (layerControlContainer) {
-            // Prevent any form elements inside the control from being submitted
-            const inputs = layerControlContainer.querySelectorAll('input');
-            inputs.forEach(input => {
-                input.setAttribute('form', 'no-form');
-            });
-        }
+        L.control.layers(baseLayers).addTo(map);
 
         // Add geocoder control
         // Coordonnées saisies (décimal, DMS, DMM, N/S/E/W) => point exact ;
@@ -57,90 +44,19 @@ CTFd.plugin.run((_CTFd) => {
             }),
         }).addTo(map);
 
-        geocoder.on('markgeocode', function(event) {
-            const center = event.geocode.center;
-            
-            // Update form fields
-            $('#latitude').val(center.lat.toFixed(10));
-            $('#longitude').val(center.lng.toFixed(10));
-            
-            // Update or create marker
-            if (marker) {
-                marker.setLatLng(center);
-            } else {
-                marker = L.marker(center).addTo(map);
-            }
-            
-            // Update circles
-            updateCircles();
-            
-            // Zoom to location
-            map.fitBounds(event.geocode.bbox);
-        });
-
         let marker = null;
-        
-        // Handle map clicks
-        map.on('click', function(e) {
-            const lat = e.latlng.lat;
-            const lng = e.latlng.lng;
-            
-            // Update form fields
-            $('#latitude').val(lat.toFixed(10));
-            $('#longitude').val(lng.toFixed(10));
-            
-            // Update or create marker
-            if (marker) {
-                marker.setLatLng(e.latlng);
-            } else {
-                marker = L.marker(e.latlng).addTo(map);
-            }
+        let currentMode = 'point';
 
-            // Update circles
-            updateCircles();
-        });
-
-        // Handle manual coordinate input
-        $('#latitude, #longitude').on('change', function() {
-            const lat = parseFloat($('#latitude').val());
-            const lng = parseFloat($('#longitude').val());
-            
-            if (isNaN(lat) || isNaN(lng)) {
-                return;
-            }
-            
-            const latlng = L.latLng(lat, lng);
-            
-            // Update or create marker
-            if (marker) {
-                marker.setLatLng(latlng);
-            } else {
-                marker = L.marker(latlng).addTo(map);
-            }
-            
-            // Center map on marker
-            map.setView(latlng);
-            
-            // Update circles
-            updateCircles();
-        });
-
-        // Add circles for visualization
+        // ---- Point + radius mode ----
         function updateCircles() {
-            // Clear existing circles
             map.eachLayer((layer) => {
                 if (layer instanceof L.Circle) {
                     map.removeLayer(layer);
                 }
             });
-
-            if (!marker) return;
-
+            if (!marker || currentMode !== 'point') return;
             const tolerance = parseFloat($('input[name="tolerance_radius"]').val());
-
             if (isNaN(tolerance)) return;
-
-            // Add tolerance radius circle
             L.circle(marker.getLatLng(), {
                 radius: tolerance,
                 color: 'green',
@@ -149,10 +65,116 @@ CTFd.plugin.run((_CTFd) => {
             }).addTo(map);
         }
 
-        // Update circles when values change
+        function setPoint(latlng) {
+            $('#latitude').val(latlng.lat.toFixed(10));
+            $('#longitude').val(latlng.lng.toFixed(10));
+            if (marker) {
+                marker.setLatLng(latlng);
+            } else {
+                marker = L.marker(latlng).addTo(map);
+            }
+            updateCircles();
+        }
+
+        geocoder.on('markgeocode', function (event) {
+            const center = event.geocode.center;
+            if (currentMode === 'point') {
+                setPoint(center);
+            }
+            map.fitBounds(event.geocode.bbox);
+        });
+
+        map.on('click', function (e) {
+            if (currentMode !== 'point') return;
+            setPoint(e.latlng);
+        });
+
+        $('#latitude, #longitude').on('change', function () {
+            const lat = parseFloat($('#latitude').val());
+            const lng = parseFloat($('#longitude').val());
+            if (isNaN(lat) || isNaN(lng)) return;
+            const latlng = L.latLng(lat, lng);
+            setPoint(latlng);
+            map.setView(latlng);
+        });
+
         $('input[name="tolerance_radius"]').on('change', updateCircles);
 
-        // Update circles when marker moves
-        map.on('click', updateCircles);
+        // ---- Polygon mode (Leaflet.Draw) ----
+        const drawnItems = new L.FeatureGroup().addTo(map);
+        const drawControl = new L.Control.Draw({
+            draw: {
+                polygon: { allowIntersection: false, showArea: false },
+                marker: false,
+                polyline: false,
+                rectangle: false,
+                circle: false,
+                circlemarker: false,
+            },
+            edit: { featureGroup: drawnItems, remove: true },
+        });
+
+        function polygonCentroid(coords) {
+            let lat = 0, lng = 0;
+            coords.forEach((c) => { lat += c[0]; lng += c[1]; });
+            return [lat / coords.length, lng / coords.length];
+        }
+
+        function serializePolygon() {
+            let coords = [];
+            drawnItems.eachLayer((layer) => {
+                if (layer instanceof L.Polygon) {
+                    coords = layer.getLatLngs()[0].map((p) => [p.lat, p.lng]);
+                }
+            });
+            if (coords.length >= 3) {
+                $('#polygon').val(JSON.stringify(coords));
+                // Store the centroid as a fallback point (unused while a polygon is set)
+                const c = polygonCentroid(coords);
+                $('#latitude').val(c[0].toFixed(10));
+                $('#longitude').val(c[1].toFixed(10));
+            } else {
+                $('#polygon').val('');
+            }
+        }
+
+        map.on(L.Draw.Event.CREATED, function (e) {
+            drawnItems.clearLayers(); // single polygon only
+            drawnItems.addLayer(e.layer);
+            serializePolygon();
+        });
+        map.on(L.Draw.Event.EDITED, serializePolygon);
+        map.on(L.Draw.Event.DELETED, serializePolygon);
+
+        // ---- Mode switching ----
+        function setMode(mode) {
+            currentMode = mode;
+            const isPolygon = mode === 'polygon';
+
+            $('.geo-point-fields').toggle(!isPolygon);
+            $('.geo-hint-point').toggle(!isPolygon);
+            $('.geo-hint-polygon').toggle(isPolygon);
+            // Hidden required inputs block form submission, so only require in point mode
+            $('#latitude, #longitude, input[name="tolerance_radius"]').prop('required', !isPolygon);
+
+            if (isPolygon) {
+                map.addControl(drawControl);
+                if (marker) { map.removeLayer(marker); marker = null; }
+                updateCircles(); // clears circles
+            } else {
+                map.removeControl(drawControl);
+                drawnItems.clearLayers();
+                $('#polygon').val('');
+            }
+        }
+
+        $('input[name="geo_mode"]').on('change', function () {
+            setMode(this.value);
+        });
+
+        // Initialize in the currently selected mode (point by default)
+        setMode($('input[name="geo_mode"]:checked').val() || 'point');
+
+        setTimeout(() => map.invalidateSize(), 200);
     }
 });

@@ -14,8 +14,11 @@ This plugin was originally developed for [Oscar Zulu](https://oscarzulu.org) to 
 ## Features
 
 - Create challenges requiring users to find specific geographic locations
-- Set custom tolerance radius for accepting answers
-- Geocoding support for location search
+- Two answer types:
+  - **Point + tolerance radius** — an answer counts if it lands within a given radius of the target
+  - **Polygon zone** — an answer counts if it lands inside a drawn area (e.g. a specific building)
+- Draw and edit polygon answer zones directly on the map (Leaflet.Draw)
+- Geocoding support for location search, including exact coordinate input (decimal, DMS, DMM, N/S/E/W)
 - Multilingual interface (English, French, Spanish)
 - Interactive map interface using Leaflet and OpenStreetMap
 - Coordinate selection via map click or search
@@ -39,9 +42,12 @@ This plugin was originally developed for [Oscar Zulu](https://oscarzulu.org) to 
 1. In the CTFd admin panel, go to Challenges → Create Challenge
 2. Select "geo" as the challenge type
 3. Fill in the standard fields (name, category, description, etc.)
-4. Set the point value and select the target location on the map
-5. Set a tolerance radius (in meters)
-6. Save your challenge
+4. Choose the **answer type**:
+   - *Point + tolerance radius*: click the target location on the map and set a tolerance radius (in meters)
+   - *Polygon zone*: use the polygon tool (top-left of the map) to draw the answer area, then fine-tune its vertices
+5. Save your challenge
+
+You can search for a place by name or paste exact coordinates (decimal, DMS, DMM, or N/S/E/W) into the search box.
 
 ### Solving a Geo Challenge
 
@@ -49,7 +55,9 @@ Players will:
 1. See an interactive map when viewing the challenge
 2. Place a marker by clicking on the map or using the search box
 3. Submit their answer
-4. Receive points if their selected location is within the tolerance radius of the target
+4. Receive points if their point is within the tolerance radius of the target (point mode) or inside the answer zone (polygon mode)
+
+The target location — coordinates, radius or polygon — is never sent to the player.
 
 ## Configuration
 
@@ -75,6 +83,7 @@ This project is licensed under the GPLv3 License - see the LICENSE file for deta
 ## Acknowledgments
 
 - [Leaflet](https://leafletjs.com/) for the map interface
+- [Leaflet.draw](https://github.com/Leaflet/Leaflet.draw) for polygon drawing and editing
 - [OpenStreetMap](https://www.openstreetmap.org) for the map tiles
 - [Leaflet Control Geocoder](https://github.com/perliedman/leaflet-control-geocoder) for geocoding functionality
 

@@ -9,6 +9,7 @@ from CTFd.utils.user import get_ip
 from CTFd.utils.decorators import authed_only
 from CTFd.plugins.migrations import upgrade
 import math
+import json
 from sqlalchemy import Numeric
 
 
@@ -20,11 +21,18 @@ class GeoChallenge(Challenges):
     latitude = db.Column(Numeric(12, 10), server_default="0")
     longitude = db.Column(Numeric(13, 10), server_default="0")
     tolerance_radius = db.Column(Numeric(10, 2), server_default="10")
+    # Optional GeoJSON-like polygon (JSON array of [lat, lng] vertices).
+    # When set, validation uses point-in-polygon instead of point + radius.
+    polygon = db.Column(db.Text)
 
     def __init__(self, *args, **kwargs):
         self.latitude = kwargs.pop('latitude', 0)
         self.longitude = kwargs.pop('longitude', 0)
         self.tolerance_radius = kwargs.pop('tolerance_radius', 10)
+        # Empty string => no polygon (point + radius mode)
+        self.polygon = kwargs.pop('polygon', None) or None
+        # UI-only field, never persisted
+        kwargs.pop('geo_mode', None)
 
         # Remove any Leaflet-related fields that might have been added
         keys_to_remove = []
@@ -64,10 +72,36 @@ class GeoChallengeType(BaseChallenge):
     def read(cls, challenge):
         data = super().read(challenge)
         data["tolerance_radius"] = float(challenge.tolerance_radius or 10)
+        # Expose only whether the challenge uses a polygon zone, never the
+        # polygon geometry itself (it would give away the answer).
+        data["polygon_mode"] = bool(challenge.polygon)
         # Never expose target coordinates to players via the public API
         data.pop("latitude", None)
         data.pop("longitude", None)
+        data.pop("polygon", None)
         return data
+
+    @staticmethod
+    def point_in_polygon(lat, lon, vertices):
+        """Ray-casting point-in-polygon test.
+
+        `vertices` is a list of [lat, lng] pairs. Coordinates are treated as
+        planar, which is accurate enough at the scale of a building/zone.
+        """
+        inside = False
+        n = len(vertices)
+        if n < 3:
+            return False
+        j = n - 1
+        for i in range(n):
+            yi, xi = vertices[i][0], vertices[i][1]
+            yj, xj = vertices[j][0], vertices[j][1]
+            if ((yi > lat) != (yj > lat)) and (
+                lon < (xj - xi) * (lat - yi) / (yj - yi) + xi
+            ):
+                inside = not inside
+            j = i
+        return inside
 
     @classmethod
     def calculate_distance(cls, lat1, lon1, lat2, lon2):
@@ -106,6 +140,25 @@ class GeoChallengeType(BaseChallenge):
                 message="Invalid coordinates submitted"
             )
 
+        # Polygon mode: the answer is a drawn zone, not a point + radius
+        if challenge.polygon:
+            try:
+                vertices = json.loads(challenge.polygon)
+            except (ValueError, TypeError):
+                vertices = None
+
+            if vertices and cls.point_in_polygon(user_lat, user_lon, vertices):
+                return ChallengeResponse(
+                    status="correct",
+                    message="Correct! You found the location!"
+                )
+
+            return ChallengeResponse(
+                status="incorrect",
+                message="Incorrect location. Try again!"
+            )
+
+        # Point + radius mode (default)
         distance = cls.calculate_distance(
             float(challenge.latitude), float(challenge.longitude),
             user_lat, user_lon
@@ -229,6 +282,10 @@ def load(app):
     register_plugin_script("/plugins/geo_challenges/assets/geocoder/Control.Geocoder.js")
     register_admin_plugin_stylesheet("/plugins/geo_challenges/assets/geocoder/Control.Geocoder.css")
     register_admin_plugin_script("/plugins/geo_challenges/assets/geocoder/Control.Geocoder.js")
+
+    # Register Leaflet.Draw (admin only — used to draw polygon answer zones)
+    register_admin_plugin_stylesheet("/plugins/geo_challenges/assets/draw/leaflet.draw.css")
+    register_admin_plugin_script("/plugins/geo_challenges/assets/draw/leaflet.draw.js")
 
     register_plugin_script("/plugins/geo_challenges/assets/view.js")
 
