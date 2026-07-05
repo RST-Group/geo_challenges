@@ -1,7 +1,5 @@
-# WARNING : This plugins has been refactored because of a previous security issue.
-
-(it is also now compatible with CTFd3.8)
-
+## NEW : 
+Use Polygon instead of pinpoint+radius to define flag area. (retrocompatibility is ensured)
 
 # CTFd Geo Challenges Plugin
 
