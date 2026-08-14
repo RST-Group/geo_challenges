@@ -80,15 +80,9 @@ CTFd.plugin.run((_CTFd) => {
             window.GeoChallenge.translate(instructionKey)
         );
     };
-    
-    // Charger les traductions une fois que la page est prête
-    $(document).on('shown.bs.modal', function (e) {
-        // Attendre un peu pour s'assurer que le modal est complètement affiché
-        setTimeout(function() {
-            // Vérifier si c'est un challenge de type geo
-            if ($('#map-solve').length) {
-                window.GeoChallenge.applyTranslations();
-            }
-        }, 100);
-    });
+
+    // Les traductions sont appliquées par view.js (initializeChallenge), une fois
+    // les détails du challenge récupérés : c'est seulement à ce moment que
+    // data-polygon-mode est connu. Traduire plus tôt afficherait brièvement les
+    // instructions "cercle de tolérance" sur un challenge polygone.
 });
