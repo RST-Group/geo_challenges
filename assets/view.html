@@ -51,6 +51,20 @@
 
                         <span class="challenge-desc">{{ challenge.description | markdown | safe }}</span>
 
+                        {% if challenge.connection_info %}
+                            <div class="mb-2">
+                                <span class="challenge-connection-info">
+                                    {% set conn = challenge.connection_info %}
+
+                                    {% if conn.startswith("http") %}
+                                        {{ conn | urlize(target="_blank") }}
+                                    {% else %}
+                                        <code>{{ conn }}</code>
+                                    {% endif %}
+                                </span>
+                            </div>
+                        {% endif %}
+
                         <div id="map-container" class="my-4">
                             <div id="map-solve" style="height: 400px; width: 100%; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 15px;"></div>
                             
