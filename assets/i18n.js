@@ -5,24 +5,28 @@ CTFd.plugin.run((_CTFd) => {
     const translations = {
         'en': {
             'click_map': 'Click on the map to place your marker. A blue circle indicates the tolerance zone.',
+            'click_map_polygon': 'Click on the map to place your marker. Your answer is valid if the marker is placed inside the predefined answer zone.',
             'submit_location': 'Submit Location',
             'select_location_first': 'Please select a location on the map first.',
             'error_submitting': 'Error submitting challenge'
         },
         'fr': {
             'click_map': 'Cliquez sur la carte pour placer votre marqueur. Un cercle bleu indique la zone de tolérance.',
+            'click_map_polygon': 'Cliquez sur la carte pour placer votre marqueur. Votre réponse est validée si le marqueur se trouve dans la zone de réponse prédéfinie.',
             'submit_location': 'Soumettre la position',
             'select_location_first': 'Veuillez d\'abord sélectionner un emplacement sur la carte.',
             'error_submitting': 'Erreur lors de la soumission du défi'
         },
         'es': {
             'click_map': 'Haga clic en el mapa para colocar su marcador. Un círculo azul indica la zona de tolerancia.',
+            'click_map_polygon': 'Haga clic en el mapa para colocar su marcador. La respuesta es válida si el marcador se encuentra dentro de la zona de respuesta predefinida.',
             'submit_location': 'Enviar ubicación',
             'select_location_first': 'Por favor, seleccione primero una ubicación en el mapa.',
             'error_submitting': 'Error al enviar el desafío'
         },
         'ja': {
           'click_map': '地図上をクリックしてマーカーを置いてください。マーカーを置いた際の青い円は許容誤差範囲を示します。',
+          'click_map_polygon': '地図上をクリックしてマーカーを置いてください。マーカーが事前に設定された回答ゾーン内にある場合、正解として判定されます。',
           'submit_location': 'Submit Location',
           'select_location_first': '地図上で座標を選択してください。',
           'error_submitting': '問題の提出中にエラーが発生しました。'
@@ -60,9 +64,21 @@ CTFd.plugin.run((_CTFd) => {
     
     // Fonction pour appliquer les traductions aux éléments HTML
     window.GeoChallenge.applyTranslations = function() {
-        // Traduire les éléments statiques
-        $('#geo-submit').text(window.GeoChallenge.translate('submit_location'));
-        $('.map-instructions').text(window.GeoChallenge.translate('click_map'));
+        $('#geo-submit').text(
+            window.GeoChallenge.translate('submit_location')
+        );
+
+        // Adapter les instructions au type de réponse du challenge
+        const polygonMode =
+            $('#map-solve').attr('data-polygon-mode') === '1';
+
+        const instructionKey = polygonMode
+            ? 'click_map_polygon'
+            : 'click_map';
+
+        $('.map-instructions').text(
+            window.GeoChallenge.translate(instructionKey)
+        );
     };
     
     // Charger les traductions une fois que la page est prête
