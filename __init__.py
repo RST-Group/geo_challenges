@@ -17,11 +17,8 @@ from CTFd.exceptions.challenges import ChallengeCreateException
 from .decay import DECAY_FUNCTIONS, logarithmic
 
 
-class GeoChallenge(Challenges):
-    __mapper_args__ = {"polymorphic_identity": "geo"}
-    id = db.Column(
-        db.Integer, db.ForeignKey("challenges.id", ondelete="CASCADE"), primary_key=True
-    )
+class GeoFieldsMixin:
+    """Answer zone columns and create-form handling shared by the geo models."""
     latitude = db.Column(Numeric(12, 10), server_default="0")
     longitude = db.Column(Numeric(13, 10), server_default="0")
     tolerance_radius = db.Column(Numeric(10, 2), server_default="10")
@@ -30,42 +27,45 @@ class GeoChallenge(Challenges):
     polygon = db.Column(db.Text)
 
     def __init__(self, *args, **kwargs):
-        pop_geo_fields(self, kwargs)
-        super(GeoChallenge, self).__init__(**kwargs)
+        # Move the geo answer fields onto the challenge and drop UI-only fields
+        # so the Challenges constructor doesn't receive them.
+        self.latitude = kwargs.pop('latitude', 0)
+        self.longitude = kwargs.pop('longitude', 0)
+        self.tolerance_radius = kwargs.pop('tolerance_radius', 10)
+        # Empty string => no polygon (point + radius mode)
+        self.polygon = kwargs.pop('polygon', None) or None
+        # UI-only field, never persisted
+        kwargs.pop('geo_mode', None)
+
+        # Remove any Leaflet-related fields that might have been added
+        keys_to_remove = []
+        for key in kwargs.keys():
+            if 'leaflet' in key.lower() or 'layer' in key.lower():
+                keys_to_remove.append(key)
+
+        for key in keys_to_remove:
+            kwargs.pop(key, None)
+
+        super().__init__(**kwargs)
 
 
-def pop_geo_fields(challenge, kwargs):
-    """Move the geo answer fields from create-form kwargs onto `challenge` and
-    drop UI-only fields so the parent constructor doesn't receive them."""
-    challenge.latitude = kwargs.pop('latitude', 0)
-    challenge.longitude = kwargs.pop('longitude', 0)
-    challenge.tolerance_radius = kwargs.pop('tolerance_radius', 10)
-    # Empty string => no polygon (point + radius mode)
-    challenge.polygon = kwargs.pop('polygon', None) or None
-    # UI-only field, never persisted
-    kwargs.pop('geo_mode', None)
-
-    # Remove any Leaflet-related fields that might have been added
-    keys_to_remove = []
-    for key in kwargs.keys():
-        if 'leaflet' in key.lower() or 'layer' in key.lower():
-            keys_to_remove.append(key)
-
-    for key in keys_to_remove:
-        kwargs.pop(key, None)
+class GeoStaticChallenge(GeoFieldsMixin, Challenges):
+    # Explicit: the table name used to be derived from the old class name
+    # (GeoChallenge) and existing installs depend on it.
+    __tablename__ = "geo_challenge"
+    __mapper_args__ = {"polymorphic_identity": "geo"}
+    id = db.Column(
+        db.Integer, db.ForeignKey("challenges.id", ondelete="CASCADE"), primary_key=True
+    )
 
 
-class GeoDynamicChallenge(Challenges):
+class GeoDynamicChallenge(GeoFieldsMixin, Challenges):
     """Geo challenge whose value decays with solves, like CTFd's "dynamic" type."""
     __tablename__ = "geo_dynamic_challenge"
     __mapper_args__ = {"polymorphic_identity": "geo_dynamic"}
     id = db.Column(
         db.Integer, db.ForeignKey("challenges.id", ondelete="CASCADE"), primary_key=True
     )
-    latitude = db.Column(Numeric(12, 10), server_default="0")
-    longitude = db.Column(Numeric(13, 10), server_default="0")
-    tolerance_radius = db.Column(Numeric(10, 2), server_default="10")
-    polygon = db.Column(db.Text)
     # Prefixed like CTFd's DynamicChallenge: CTFd >= 3.8 also has initial/minimum/
     # decay/function columns on `challenges`, which the properties below shadow.
     dynamic_initial = db.Column(db.Integer, default=0)
@@ -106,7 +106,6 @@ class GeoDynamicChallenge(Challenges):
         self.dynamic_function = function_value
 
     def __init__(self, *args, **kwargs):
-        pop_geo_fields(self, kwargs)
         for attr in ("initial", "minimum", "decay"):
             if kwargs.get(attr) in (None, ""):
                 raise ChallengeCreateException(f"Missing {attr} value for challenge")
@@ -116,7 +115,7 @@ class GeoDynamicChallenge(Challenges):
                 raise ChallengeCreateException(f"Invalid input for '{attr}'")
         if kwargs.get("function") not in DECAY_FUNCTIONS:
             kwargs["function"] = "logarithmic"
-        super(GeoDynamicChallenge, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.value = self.initial
 
 
@@ -140,7 +139,7 @@ class GeoChallengeType(BaseChallenge):
         template_folder="templates",
         static_folder="assets",
     )
-    challenge_model = GeoChallenge
+    challenge_model = GeoStaticChallenge
 
     @classmethod
     def read(cls, challenge):
