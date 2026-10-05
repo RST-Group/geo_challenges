@@ -27,8 +27,6 @@ class GeoFieldsMixin:
     polygon = db.Column(db.Text)
 
     def __init__(self, *args, **kwargs):
-        # Move the geo answer fields onto the challenge and drop UI-only fields
-        # so the Challenges constructor doesn't receive them.
         self.latitude = kwargs.pop('latitude', 0)
         self.longitude = kwargs.pop('longitude', 0)
         self.tolerance_radius = kwargs.pop('tolerance_radius', 10)
