@@ -12,6 +12,10 @@ import math
 import json
 from sqlalchemy import Numeric
 
+from CTFd.exceptions.challenges import ChallengeCreateException
+
+from .decay import DECAY_FUNCTIONS, logarithmic
+
 
 class GeoChallenge(Challenges):
     __mapper_args__ = {"polymorphic_identity": "geo"}
@@ -26,24 +30,94 @@ class GeoChallenge(Challenges):
     polygon = db.Column(db.Text)
 
     def __init__(self, *args, **kwargs):
-        self.latitude = kwargs.pop('latitude', 0)
-        self.longitude = kwargs.pop('longitude', 0)
-        self.tolerance_radius = kwargs.pop('tolerance_radius', 10)
-        # Empty string => no polygon (point + radius mode)
-        self.polygon = kwargs.pop('polygon', None) or None
-        # UI-only field, never persisted
-        kwargs.pop('geo_mode', None)
-
-        # Remove any Leaflet-related fields that might have been added
-        keys_to_remove = []
-        for key in kwargs.keys():
-            if 'leaflet' in key.lower() or 'layer' in key.lower():
-                keys_to_remove.append(key)
-
-        for key in keys_to_remove:
-            kwargs.pop(key, None)
-
+        pop_geo_fields(self, kwargs)
         super(GeoChallenge, self).__init__(**kwargs)
+
+
+def pop_geo_fields(challenge, kwargs):
+    """Move the geo answer fields from create-form kwargs onto `challenge` and
+    drop UI-only fields so the parent constructor doesn't receive them."""
+    challenge.latitude = kwargs.pop('latitude', 0)
+    challenge.longitude = kwargs.pop('longitude', 0)
+    challenge.tolerance_radius = kwargs.pop('tolerance_radius', 10)
+    # Empty string => no polygon (point + radius mode)
+    challenge.polygon = kwargs.pop('polygon', None) or None
+    # UI-only field, never persisted
+    kwargs.pop('geo_mode', None)
+
+    # Remove any Leaflet-related fields that might have been added
+    keys_to_remove = []
+    for key in kwargs.keys():
+        if 'leaflet' in key.lower() or 'layer' in key.lower():
+            keys_to_remove.append(key)
+
+    for key in keys_to_remove:
+        kwargs.pop(key, None)
+
+
+class GeoDynamicChallenge(Challenges):
+    """Geo challenge whose value decays with solves, like CTFd's "dynamic" type."""
+    __tablename__ = "geo_dynamic_challenge"
+    __mapper_args__ = {"polymorphic_identity": "geo_dynamic"}
+    id = db.Column(
+        db.Integer, db.ForeignKey("challenges.id", ondelete="CASCADE"), primary_key=True
+    )
+    latitude = db.Column(Numeric(12, 10), server_default="0")
+    longitude = db.Column(Numeric(13, 10), server_default="0")
+    tolerance_radius = db.Column(Numeric(10, 2), server_default="10")
+    polygon = db.Column(db.Text)
+    # Prefixed like CTFd's DynamicChallenge: CTFd >= 3.8 also has initial/minimum/
+    # decay/function columns on `challenges`, which the properties below shadow.
+    dynamic_initial = db.Column(db.Integer, default=0)
+    dynamic_minimum = db.Column(db.Integer, default=0)
+    dynamic_decay = db.Column(db.Integer, default=0)
+    dynamic_function = db.Column(db.String(32), default="logarithmic")
+
+    @property
+    def initial(self):
+        return self.dynamic_initial
+
+    @initial.setter
+    def initial(self, initial_value):
+        self.dynamic_initial = initial_value
+
+    @property
+    def minimum(self):
+        return self.dynamic_minimum
+
+    @minimum.setter
+    def minimum(self, minimum_value):
+        self.dynamic_minimum = minimum_value
+
+    @property
+    def decay(self):
+        return self.dynamic_decay
+
+    @decay.setter
+    def decay(self, decay_value):
+        self.dynamic_decay = decay_value
+
+    @property
+    def function(self):
+        return self.dynamic_function
+
+    @function.setter
+    def function(self, function_value):
+        self.dynamic_function = function_value
+
+    def __init__(self, *args, **kwargs):
+        pop_geo_fields(self, kwargs)
+        for attr in ("initial", "minimum", "decay"):
+            if kwargs.get(attr) in (None, ""):
+                raise ChallengeCreateException(f"Missing {attr} value for challenge")
+            try:
+                kwargs[attr] = int(float(kwargs[attr]))
+            except (ValueError, TypeError):
+                raise ChallengeCreateException(f"Invalid input for '{attr}'")
+        if kwargs.get("function") not in DECAY_FUNCTIONS:
+            kwargs["function"] = "logarithmic"
+        super(GeoDynamicChallenge, self).__init__(**kwargs)
+        self.value = self.initial
 
 
 class GeoChallengeType(BaseChallenge):
@@ -241,6 +315,53 @@ class GeoChallengeType(BaseChallenge):
         db.session.add(fail)
         db.session.commit()
 
+class GeoDynamicChallengeType(GeoChallengeType):
+    """Same answer checking as `geo`, scored like CTFd's `dynamic` type."""
+    id = "geo_dynamic"
+    name = "geo_dynamic"
+    templates = {
+        "create": "/plugins/geo_challenges/assets/create_dynamic.html",
+        "update": "/plugins/geo_challenges/assets/update_dynamic.html",
+        "view": "/plugins/geo_challenges/assets/view.html",
+    }
+    scripts = GeoChallengeType.scripts
+    challenge_model = GeoDynamicChallenge
+
+    @classmethod
+    def calculate_value(cls, challenge):
+        f = DECAY_FUNCTIONS.get(challenge.function, logarithmic)
+        challenge.value = f(challenge)
+        db.session.commit()
+        return challenge
+
+    @classmethod
+    def read(cls, challenge):
+        data = super().read(challenge)
+        data.update(
+            {
+                "initial": challenge.initial,
+                "decay": challenge.decay,
+                "minimum": challenge.minimum,
+                "function": challenge.function,
+            }
+        )
+        return data
+
+    @classmethod
+    def update(cls, challenge, request):
+        # BaseChallenge.update commits, so the dynamic fields are reloaded from
+        # the database as numbers before the value is recalculated.
+        challenge = super().update(challenge, request)
+        if challenge.function not in DECAY_FUNCTIONS:
+            challenge.function = "logarithmic"
+        return cls.calculate_value(challenge)
+
+    @classmethod
+    def solve(cls, user, team, challenge, request):
+        super().solve(user, team, challenge, request)
+        cls.calculate_value(challenge)
+
+
 def load(app):
 
     upgrade(plugin_name="geo_challenges")
@@ -346,3 +467,4 @@ def load(app):
 
     # Register the challenge type
     CHALLENGE_CLASSES["geo"] = GeoChallengeType
+    CHALLENGE_CLASSES["geo_dynamic"] = GeoDynamicChallengeType
